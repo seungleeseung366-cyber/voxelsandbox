@@ -6,3 +6,4 @@ out.txt
 *.iml
 local.properties
 .vscode/
+android/libs/

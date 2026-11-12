@@ -9,10 +9,26 @@ android {
         versionCode 1
         versionName '1.0'
     }
+    sourceSets.main.jniLibs.srcDirs = ['libs']
 }
+configurations { natives }
 dependencies {
     implementation project(':core')
     implementation "com.badlogicgames.gdx:gdx-backend-android:${gdxVersion}"
-    implementation "com.badlogicgames.gdx:gdx-platform:${gdxVersion}:natives-armeabi-v7a"
-    implementation "com.badlogicgames.gdx:gdx-platform:${gdxVersion}:natives-arm64-v8a"
+    natives "com.badlogicgames.gdx:gdx-platform:${gdxVersion}:natives-armeabi-v7a"
+    natives "com.badlogicgames.gdx:gdx-platform:${gdxVersion}:natives-arm64-v8a"
+}
+tasks.register('copyAndroidNatives') {
+    doFirst {
+        ['armeabi-v7a', 'arm64-v8a'].each { file("libs/$it").mkdirs() }
+        configurations.natives.copy().files.each { jar ->
+            def abi = ['armeabi-v7a', 'arm64-v8a'].find { jar.name.endsWith("natives-${it}.jar") }
+            if (abi != null) {
+                copy { from zipTree(jar); into file("libs/$abi"); include '*.so' }
+            }
+        }
+    }
+}
+tasks.matching { it.name.contains('merge') && it.name.contains('JniLibFolders') }.configureEach {
+    dependsOn 'copyAndroidNatives'
 }
