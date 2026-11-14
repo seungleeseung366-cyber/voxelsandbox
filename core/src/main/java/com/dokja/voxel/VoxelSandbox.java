@@ -124,7 +124,7 @@ public class VoxelSandbox extends ApplicationAdapter implements InputProcessor {
         try {
             FileHandle[] files = Gdx.files.internal("").list(".glb");
             if (files == null || files.length == 0) return;
-            SceneAsset asset = new GLBLoader().load(files[0]);
+            SceneAsset asset = new GLBLoader().load(Gdx.files.internal(files[0].name()));
             ModelInstance inst = new ModelInstance(asset.scene.model);
             BoundingBox bb = new BoundingBox();
             inst.calculateBoundingBox(bb);
