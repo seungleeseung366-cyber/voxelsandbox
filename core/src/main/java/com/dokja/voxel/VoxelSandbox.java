@@ -7,6 +7,11 @@ import com.badlogic.gdx.graphics.g3d.attributes.*;
 import com.badlogic.gdx.graphics.g3d.utils.*;
 import com.badlogic.gdx.graphics.g2d.*;
 import com.badlogic.gdx.graphics.g3d.environment.DirectionalLight;
+import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
+import com.badlogic.gdx.files.FileHandle;
+import com.badlogic.gdx.math.collision.BoundingBox;
+import net.mgsx.gltf.loaders.glb.GLBLoader;
+import net.mgsx.gltf.scene3d.scene.SceneAsset;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.*;
 import com.badlogic.gdx.utils.*;
@@ -25,6 +30,11 @@ public class VoxelSandbox extends ApplicationAdapter implements InputProcessor {
     private Model cubeModel, playerModel;
     private final Array<ModelInstance> blocks = new Array<>();
     private ModelInstance player;
+    private AnimationController animController;
+    private SceneAsset playerAsset;
+    private boolean glbPlayer = false, moving = false;
+    private float modelScale = 1f, modelOffX, modelOffY, modelOffZ, facingDeg = 0f;
+    private String walkAnim, idleAnim, currentAnim;
     private ShapeRenderer shapes;
     private SpriteBatch uiBatch;
     private BitmapFont font;
@@ -45,7 +55,9 @@ public class VoxelSandbox extends ApplicationAdapter implements InputProcessor {
     private float jumpX, jumpY, jumpSize;
 
     @Override public void create() {
-        batch = new ModelBatch();
+        DefaultShader.Config shaderConfig = new DefaultShader.Config();
+        shaderConfig.numBones = 64;
+        batch = new ModelBatch(new DefaultShaderProvider(shaderConfig));
         modelBuilder = new ModelBuilder();
         shapes = new ShapeRenderer();
         uiBatch = new SpriteBatch();
@@ -74,6 +86,7 @@ public class VoxelSandbox extends ApplicationAdapter implements InputProcessor {
             }
         }
         player = new ModelInstance(playerModel);
+        loadCharacter();
         setDefaultKeybinds();
         Gdx.input.setInputProcessor(this);
         resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
@@ -100,14 +113,63 @@ public class VoxelSandbox extends ApplicationAdapter implements InputProcessor {
 
         batch.begin(camera);
         for (ModelInstance block : blocks) batch.render(block, environment);
-        player.transform.setToTranslation(playerPos);
+        updateCharacter(dt);
         batch.render(player, environment);
         batch.end();
 
         drawTouchUI();
     }
 
+    private void loadCharacter() {
+        try {
+            FileHandle[] files = Gdx.files.internal("").list(".glb");
+            if (files == null || files.length == 0) return;
+            SceneAsset asset = new GLBLoader().load(files[0]);
+            ModelInstance inst = new ModelInstance(asset.scene.model);
+            BoundingBox bb = new BoundingBox();
+            inst.calculateBoundingBox(bb);
+            float h = bb.getHeight();
+            if (h <= 0.0001f) throw new RuntimeException("Model kosong");
+            modelScale = 1.8f / h;
+            modelOffX = -(bb.min.x + bb.max.x) / 2f;
+            modelOffY = -bb.min.y;
+            modelOffZ = -(bb.min.z + bb.max.z) / 2f;
+            if (inst.animations.size > 0) {
+                animController = new AnimationController(inst);
+                for (com.badlogic.gdx.graphics.g3d.model.Animation a : inst.animations) {
+                    String n = a.id == null ? "" : a.id.toLowerCase();
+                    if (walkAnim == null && (n.contains("walk") || n.contains("run"))) walkAnim = a.id;
+                    if (idleAnim == null && n.contains("idle")) idleAnim = a.id;
+                }
+                if (walkAnim == null) walkAnim = inst.animations.first().id;
+            }
+            playerAsset = asset;
+            player = inst;
+            glbPlayer = true;
+        } catch (Exception e) {
+            Gdx.app.error("VoxelSandbox", "Gagal memuat model .glb, pakai kotak", e);
+        }
+    }
+
+    private void updateCharacter(float dt) {
+        if (!glbPlayer) { player.transform.setToTranslation(playerPos); return; }
+        player.transform.setToTranslation(playerPos.x, playerPos.y - 0.9f, playerPos.z)
+            .rotate(Vector3.Y, facingDeg)
+            .scale(modelScale, modelScale, modelScale)
+            .translate(modelOffX, modelOffY, modelOffZ);
+        if (animController != null) {
+            String want = moving ? walkAnim : (idleAnim != null ? idleAnim : walkAnim);
+            if (want != null && !want.equals(currentAnim)) {
+                animController.animate(want, -1, 1f, null, 0.2f);
+                currentAnim = want;
+            }
+            animController.paused = !moving && idleAnim == null;
+            animController.update(dt);
+        }
+    }
+
     private void updatePlayer(float dt) {
+        moving = false;
         if (!settingsOpen) {
             float x = joyX, z = -joyY;
             if (isDown("Forward")) z += 1;
@@ -116,6 +178,8 @@ public class VoxelSandbox extends ApplicationAdapter implements InputProcessor {
             if (isDown("Right")) x += 1;
             Vector3 direction = new Vector3(x, 0, z);
             if (direction.len2() > 1) direction.nor();
+            moving = direction.len2() > 0.01f;
+            if (moving) facingDeg = MathUtils.atan2(direction.x, direction.z) * MathUtils.radiansToDegrees;
             playerPos.x += direction.x * 5f * dt;
             playerPos.z += direction.z * 5f * dt;
 
@@ -260,5 +324,6 @@ public class VoxelSandbox extends ApplicationAdapter implements InputProcessor {
     @Override public void dispose() {
         batch.dispose(); uiBatch.dispose(); shapes.dispose(); font.dispose();
         cubeModel.dispose(); playerModel.dispose();
+        if (playerAsset != null) playerAsset.dispose();
     }
 }
